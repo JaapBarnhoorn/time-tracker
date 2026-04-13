@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "notification:default",
+    "global-shortcut:default",
+    "core:path:default",
+    "core:window:allow-set-visible-on-all-workspaces"
+  ]
+}
