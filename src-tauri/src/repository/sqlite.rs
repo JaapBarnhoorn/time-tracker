@@ -55,18 +55,34 @@ impl SqliteRepository {
                 task_name TEXT NOT NULL,
                 occurrence TEXT NOT NULL, -- JSON serialized enum
                 start_time TEXT NOT NULL, -- HH:MM
+                day_of_week INTEGER, -- 0-6
+                day_of_month INTEGER, -- 1-31
                 last_run TEXT, -- YYYY-MM-DD
                 created_at TEXT NOT NULL
             )",
             [],
         )?;
 
-        self.seed_tasks()?;
+        // Migration: Add columns if they don't exist
+        let _ = self.conn.execute("ALTER TABLE scheduled_tasks ADD COLUMN day_of_week INTEGER", []);
+        let _ = self.conn.execute("ALTER TABLE scheduled_tasks ADD COLUMN day_of_month INTEGER", []);
+
+        self.seed_defaults()?;
+        Ok(())
+    }
+
+    fn seed_defaults(&self) -> Result<()> {
+        // Check if workDays already exists to avoid overwriting user settings
+        let existing = self.get_setting("workDays")?;
+        if existing.is_none() {
+            // Default Work Days: Mon-Fri [1, 2, 3, 4, 5]
+            self.set_setting("workDays", "[1,2,3,4,5]")?;
+        }
         Ok(())
     }
 
     pub fn get_scheduled_tasks(&self) -> Result<Vec<ScheduledTask>> {
-        let mut stmt = self.conn.prepare("SELECT id, task_name, occurrence, start_time, last_run FROM scheduled_tasks")?;
+        let mut stmt = self.conn.prepare("SELECT id, task_name, occurrence, start_time, day_of_week, day_of_month, last_run FROM scheduled_tasks")?;
         let rows = stmt.query_map([], |row| {
             let occ_str: String = row.get(2)?;
             let occurrence: Occurrence = serde_json::from_str(&occ_str).unwrap_or(Occurrence::Daily);
@@ -75,7 +91,9 @@ impl SqliteRepository {
                 task_name: row.get(1)?,
                 occurrence,
                 start_time: row.get(3)?,
-                last_run: row.get(4)?,
+                day_of_week: row.get(4)?,
+                day_of_month: row.get(5)?,
+                last_run: row.get(6)?,
             })
         })?;
 
@@ -86,11 +104,11 @@ impl SqliteRepository {
         Ok(results)
     }
 
-    pub fn add_scheduled_task(&self, task_name: &str, occurrence: Occurrence, start_time: &str) -> Result<()> {
+    pub fn add_scheduled_task(&self, task_name: &str, occurrence: Occurrence, start_time: &str, day_of_week: Option<u32>, day_of_month: Option<u32>) -> Result<()> {
         let occ_str = serde_json::to_string(&occurrence).unwrap();
         self.conn.execute(
-            "INSERT INTO scheduled_tasks (task_name, occurrence, start_time, created_at) VALUES (?, ?, ?, ?)",
-            params![task_name, occ_str, start_time, Utc::now().to_rfc3339()],
+            "INSERT INTO scheduled_tasks (task_name, occurrence, start_time, day_of_week, day_of_month, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            params![task_name, occ_str, start_time, day_of_week, day_of_month, Utc::now().to_rfc3339()],
         )?;
         Ok(())
     }
@@ -123,72 +141,6 @@ impl SqliteRepository {
             "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
             params![key, value],
         )?;
-        Ok(())
-    }
-
-    fn seed_tasks(&self) -> Result<()> {
-        let count: i32 = self.conn.query_row("SELECT COUNT(*) FROM tasks", [], |r| r.get(0))?;
-        if count == 0 {
-            let initial_tasks = &[
-                "Agile Execution (AGT-EX) / Agile Delivery (AGT)",
-                "Daily Standup (AGT-DS) / Agile Delivery (AGT)",
-                "[DEV] ART-rituelen (AGT-RI) / Agile Delivery (AGT)",
-                "[DEV] Enablers (AGT-DN) / Agile Delivery (AGT)",
-                "[DEV] Features (AGT-DF) / Agile Delivery (AGT)",
-                "[DEV] Other (AGT-DO) / Agile Delivery (AGT)",
-                "[DEV] Spikes (AGT-DP) / Agile Delivery (AGT)",
-                "Documentatie bijwerken (KNM-DO) / Knowledge Management (KNM)",
-                "Execute DDM changes (per change) (CHG-DDM) / Change Management (CHG)",
-                "Execute DGD changes (per change) (CHG-DGD) / Change Management (CHG)",
-                "Hardening systems (CON-HA) / Asset and Configuration Management (CON)",
-                "Idle Hours (OTH-ID) / Other (OTH)",
-                "Inspect - Adapt (AGT-IA) / Agile Delivery (AGT)",
-                "Investigate DDM problems (per problem) (PRB-DDM) / Problem Management (PRB)",
-                "Investigate DGD problems (per problem) (PRB-DGD) / Problem Management (PRB)",
-                "Inwerken (KNM-IW) / Knowledge Management (KNM)",
-                "Kennismatrix bijwerken (KNM-MX) / Knowledge Management (KNM)",
-                "Knowledge Sharing Session (KNM-KS) / Knowledge Management (KNM)",
-                "Knowledge Transfer (KNM-KT) / Knowledge Management (KNM)",
-                "Manage Releases (per release) (REL-MR) / Release Management (REL)",
-                "Managing and monitoring access (AMG-MM) / Access Management (AMG)",
-                "Managing and monitoring availability and capacity (ACM-MM) / Availability and Capacity Management (ACM)",
-                "Managing and monitoring changes (CHG-MM) / Change Management (CHG)",
-                "Managing and monitoring configurations (CON-MM) / Asset and Configuration Management (CON)",
-                "Managing and monitoring events (EVE-MM) / Event Management (EVE)",
-                "Managing and monitoring incidents (INC-MM) / Incident Management (INC)",
-                "Managing and monitoring problems (PRB-MM) / Problem Management (PRB)",
-                "Managing and monitoring releases (overall) (REL-MM) / Release Management (REL)",
-                "Managing and monitoring service requests (REQ-MM) / Request Fulfillment (REQ)",
-                "Managing and monitoring support environment (SDS-MM) / Service Delivery Support Environment (SDS)",
-                "Meeting (overig) (AGT-MO) / Agile Delivery (AGT)",
-                "Month End Estimate - To Be Re-Booked (OTH-ME) / Other (OTH)",
-                "Patching base images (CON-BI) / Asset and Configuration Management (CON)",
-                "PI event (AGT-PI) / Agile Delivery (AGT)",
-                "PI Voorbereiding (AGT-PV) / Agile Delivery (AGT)",
-                "PMO activities (SMG-PM) / Service Management (SMG)",
-                "PO/ScM activities (AGT-PS) / Agile Delivery (AGT)",
-                "Refinement (AGT-RF) / Agile Delivery (AGT)",
-                "Retrospective (AGT- RT) / Agile Delivery (AGT)",
-                "Security and Data Privacy Management (SMG-SD) / Service Management (SMG)",
-                "SIM-nnnnnnnn [Description] - DO NOT USE THIS EXAMPLE TASK (SIM-NNNNNNNN) / Service Improvement Management (SIM)",
-                "Solve DDM events (per event) (EVE-DDM) / Event Management (EVE)",
-                "Solve DDM incidents (per incident) (INC-DDM) / Incident Management (INC)",
-                "Solve DDM service request (per request) (REQ-DDM) / Request Fulfillment (REQ)",
-                "Solve DGD events (per event) (EVE-DGD) / Event Management (EVE)",
-                "Solve DGD incidents (per incident) (INC-DGD) / Incident Management (INC)",
-                "Solve DGD service request (per request) (REQ-DGD) / Request Fulfillment (REQ)",
-                "Spike (AGT-SP) / Agile Delivery (AGT)",
-                "Sprint Demo (AGT-DE) / Agile Delivery (AGT)",
-                "Sprint Wissel (AGT-SW) / Agile Delivery (AGT)",
-                "Vulnerability scanning, assessment and reporting (CON-VU) / Asset and Configuration Management (CON)",
-            ];
-            for task in initial_tasks {
-                self.conn.execute(
-                    "INSERT INTO tasks (name, created_at) VALUES (?, ?)",
-                    params![task, Utc::now().to_rfc3339()],
-                )?;
-            }
-        }
         Ok(())
     }
 

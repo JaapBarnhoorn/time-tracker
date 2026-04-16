@@ -9,7 +9,7 @@ use crate::repository::sqlite::SqliteRepository;
 use crate::services::timer_service::TimerService;
 use crate::state::AppState;
 use tauri::{AppHandle, Manager, menu::{Menu, MenuItem}, tray::{TrayIcon, TrayIconBuilder, TrayIconEvent}};
-use chrono::{Timelike, Datelike, Utc};
+use chrono::{Timelike, Datelike, Local};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -103,23 +103,28 @@ pub fn run() {
             std::thread::spawn(move || {
                 let mut reminder_counter = 0;
                 let mut last_reminder_task_id = -1;
+                let mut last_checked_minute = -1;
+                let mut cached_work_days: Vec<u32> = vec![1, 2, 3, 4, 5];
                 
                 loop {
                     std::thread::sleep(std::time::Duration::from_secs(1));
                     
                     if let Some(state) = app_handle_for_thread.try_state::<AppState>() {
-                        let now = Utc::now();
+                        let now = Local::now();
+                        let minute = now.minute() as i32;
+                        
+                        // Update cached work days once per minute
+                        if minute != last_checked_minute {
+                            if let Ok(Some(saved)) = state.timer_service.get_setting("workDays".to_string()) {
+                                cached_work_days = serde_json::from_str(&saved).unwrap_or(vec![1, 2, 3, 4, 5]);
+                            }
+                            last_checked_minute = minute;
+                        }
+
                         let today_str = now.format("%Y-%m-%d").to_string();
                         let now_time_str = now.format("%H:%M").to_string();
                         let weekday = now.weekday(); 
                         
-                        // Fetch workDays for smart "Daily"
-                        let work_days: Vec<u32> = if let Ok(Some(saved)) = state.timer_service.get_setting("workDays".to_string()) {
-                            serde_json::from_str(&saved).unwrap_or(vec![1, 2, 3, 4, 5])
-                        } else {
-                            vec![1, 2, 3, 4, 5]
-                        };
-
                         // Check Scheduled Tasks
                         if let Ok(scheduled_tasks) = state.timer_service.get_scheduled_tasks() {
                             for task in scheduled_tasks {
@@ -128,14 +133,19 @@ pub fn run() {
                                     crate::domain::scheduled_task::Occurrence::Once => true,
                                     crate::domain::scheduled_task::Occurrence::Daily => {
                                         // Smart "Daily" only on work days
-                                        work_days.contains(&((weekday.number_from_monday() % 7) as u32))
+                                        cached_work_days.contains(&((weekday.number_from_monday() % 7) as u32))
                                     },
                                     crate::domain::scheduled_task::Occurrence::Weekly => {
-                                        // For Weekly, we assume it's on the day it was created. 
-                                        // But for simplicity, if it's due and not run today, we let it run.
-                                        true 
+                                        task.day_of_week == Some((weekday.number_from_monday() % 7) as u32)
                                     },
-                                    _ => true,
+                                    crate::domain::scheduled_task::Occurrence::BiWeekly => {
+                                        // Simple BiWeekly: same weekday and even week number (or odd, depending on start)
+                                        // To be more precise we'd need a reference date, but let's use week number for now
+                                        task.day_of_week == Some((weekday.number_from_monday() % 7) as u32) && (now.iso_week().week() % 2 == 0)
+                                    },
+                                    crate::domain::scheduled_task::Occurrence::Monthly => {
+                                        task.day_of_month == Some(now.day())
+                                    },
                                 };
 
                                 if is_due_today && task.last_run.as_deref() != Some(&today_str) {

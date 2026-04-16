@@ -23,6 +23,8 @@
     task_name: string;
     occurrence: "Once" | "Daily" | "Weekly" | "BiWeekly" | "Monthly";
     start_time: string;
+    day_of_week: number | null;
+    day_of_month: number | null;
   }
 
   interface WeeklyReportEntry {
@@ -52,12 +54,37 @@
   let newScheduleTask = $state("");
   let newScheduleOccurrence = $state<"Once" | "Daily" | "Weekly" | "BiWeekly" | "Monthly">("Daily");
   let newScheduleTime = $state("");
+  let newScheduleDayOfWeek = $state(1); // Default Mon
+  let newScheduleDayOfMonth = $state(1);
   let scheduleTaskSearch = $state("");
   let status: Status = $state({ running: false, task_name: null, elapsed_seconds: 0 });
   let dailyEntries: TimeEntry[] = $state([]);
   let lastTaskName: string | null = $state(null);
   let searchInput: HTMLInputElement | undefined = $state();
   let isDark = $state(false);
+  
+  // Day change tracking
+  let lastCheckedDay = new Date().getDate();
+  let currentSystemDate = $state(new Date().toISOString().split('T')[0]);
+
+  function checkDayChange() {
+    const now = new Date();
+    const currentDay = now.getDate();
+    
+    if (currentDay !== lastCheckedDay) {
+      console.log("Dagwissel gedetecteerd, UI verversen...");
+      lastCheckedDay = currentDay;
+      currentSystemDate = now.toISOString().split('T')[0];
+      
+      const oldToday = new Date(new Date().setDate(now.getDate() - 1)).toISOString().split('T')[0];
+      if (viewDateStr === oldToday) {
+        setToday();
+      } else {
+        loadDailyEntries();
+      }
+      loadScheduledTasks();
+    }
+  }
   
   // View Date State
   let viewDate = $state(new Date());
@@ -77,6 +104,8 @@
   let editStart = $state("");
   let editEnd = $state("");
   let isEditingCurrentStart = $state(false);
+  let entryToDelete = $state<number | null>(null);
+  let scheduledToDelete = $state<number | null>(null);
 
   let filteredTasks = $derived(
     tasks.filter(t => t.toLowerCase().includes(searchTerm.toLowerCase()))
@@ -265,13 +294,22 @@
   }
 
   async function addScheduledTask() {
-    if (!newScheduleTask || !newScheduleTime) return;
+    const taskName = newScheduleTask || scheduleTaskSearch;
+    if (!taskName || !newScheduleTime) return;
+
+    const dayOfWeek = ["Weekly", "BiWeekly"].includes(newScheduleOccurrence) ? newScheduleDayOfWeek : null;
+    const dayOfMonth = newScheduleOccurrence === "Monthly" ? newScheduleDayOfMonth : null;
+
+    const payload = { 
+      taskName: taskName, 
+      occurrence: newScheduleOccurrence, 
+      startTime: newScheduleTime,
+      dayOfWeek: dayOfWeek,
+      dayOfMonth: dayOfMonth
+    };
+
     try {
-      await invoke("add_scheduled_task", { 
-        taskName: newScheduleTask, 
-        occurrence: newScheduleOccurrence, 
-        startTime: newScheduleTime 
-      });
+      await invoke("add_scheduled_task", payload);
       newScheduleTask = "";
       scheduleTaskSearch = "";
       newScheduleTime = "";
@@ -282,14 +320,16 @@
     }
   }
 
+
   async function deleteScheduledTask(id: number) {
-    if (confirm("Deze geplande taak verwijderen?")) {
-      try {
-        await invoke("delete_scheduled_task", { id });
-        await loadScheduledTasks();
-      } catch (e) {
-        alert("Verwijderen mislukt: " + e);
-      }
+    if (id === undefined || id === null) return;
+    
+    try {
+      await invoke("delete_scheduled_task", { id });
+      scheduledToDelete = null;
+      await loadScheduledTasks();
+    } catch (e) {
+      alert("Verwijderen mislukt: " + e);
     }
   }
 
@@ -309,7 +349,13 @@
 
   async function updateStatus() {
     try {
-      status = await invoke("get_status");
+      const newStatus: Status = await invoke("get_status");
+      if (newStatus.running && newStatus.started_at) {
+        const start = new Date(newStatus.started_at).getTime();
+        const now = new Date().getTime();
+        newStatus.elapsed_seconds = Math.floor((now - start) / 1000);
+      }
+      status = newStatus;
     } catch (e) {
       console.error("Status update mislukt:", e);
     }
@@ -381,15 +427,16 @@
   }
 
   async function deleteEntry(id: number) {
-    if (confirm("Dit uren-record verwijderen?")) {
-      try {
-        await invoke("delete_time_entry", { id });
-        await loadDailyEntries();
-        await updateStatus();
-        await updateTopTasks();
-      } catch (e) {
-        alert("Verwijderen mislukt: " + e);
-      }
+    if (id === undefined || id === null) return;
+    
+    try {
+      await invoke("delete_time_entry", { id });
+      entryToDelete = null;
+      await loadDailyEntries();
+      await updateStatus();
+      await updateTopTasks();
+    } catch (e) {
+      alert("Verwijderen mislukt: " + e);
     }
   }
 
@@ -474,12 +521,17 @@
   onMount(() => {
     isDark = document.documentElement.classList.contains("dark");
     window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("focus", checkDayChange);
     loadSettings();
     loadData();
-    const interval = setInterval(updateStatus, 1000);
+    const interval = setInterval(() => {
+      updateStatus();
+      checkDayChange();
+    }, 1000);
     return () => {
       clearInterval(interval);
       window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("focus", checkDayChange);
     };
   });
 </script>
@@ -540,7 +592,13 @@
           {#if showAddSchedule}
             <div class="mb-4 space-y-3 rounded-lg bg-muted/30 p-4 border border-dashed animate-in fade-in slide-in-from-top-2 duration-200">
               <div class="space-y-2">
-                <input type="text" bind:value={scheduleTaskSearch} placeholder="Zoek taak..." class="h-9 w-full rounded-md border bg-background px-3 text-xs" />
+                <input 
+                  type="text" 
+                  bind:value={scheduleTaskSearch} 
+                  oninput={() => newScheduleTask = ""}
+                  placeholder="Zoek taak..." 
+                  class="h-9 w-full rounded-md border bg-background px-3 text-xs" 
+                />
                 {#if scheduleTaskSearch && !newScheduleTask}
                   <div class="max-h-32 overflow-y-auto rounded-md border bg-popover divide-y">
                     {#each filteredScheduleTasks.slice(0, 5) as task}
@@ -571,12 +629,38 @@
                 <div class="flex items-center gap-3">
                   <input type="time" bind:value={newScheduleTime} class="h-9 w-full rounded-md border bg-background px-3 text-xs" />
                 </div>
+
+                {#if ["Weekly", "BiWeekly"].includes(newScheduleOccurrence)}
+                  <div class="space-y-2">
+                    <label class="text-[10px] uppercase font-bold text-muted-foreground block">Op welke dag?</label>
+                    <div class="flex flex-wrap gap-1">
+                      {#each [1, 2, 3, 4, 5, 6, 0] as day}
+                        <button 
+                          onclick={() => newScheduleDayOfWeek = day}
+                          class="px-2 py-1 text-[9px] rounded border transition-all {newScheduleDayOfWeek === day ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted/30 text-muted-foreground border-transparent'}"
+                        >
+                          {dayNames[day].substring(0, 2)}
+                        </button>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
+
+                {#if newScheduleOccurrence === 'Monthly'}
+                  <div class="space-y-2">
+                    <label class="text-[10px] uppercase font-bold text-muted-foreground block">Op welke dag van de maand?</label>
+                    <div class="flex items-center gap-2">
+                      <input type="number" min="1" max="31" bind:value={newScheduleDayOfMonth} class="h-8 w-16 rounded border bg-background px-2 text-xs" />
+                      <span class="text-[10px] text-muted-foreground italic">e dag van de maand</span>
+                    </div>
+                  </div>
+                {/if}
                 
                 {#if newScheduleOccurrence === 'Daily'}
                   <p class="text-[9px] text-muted-foreground italic leading-tight">"Dagelijks" houdt rekening met je ingestelde werkdagen.</p>
                 {/if}
               </div>
-              <button onclick={addScheduledTask} disabled={!newScheduleTask || !newScheduleTime} class="w-full h-9 bg-primary text-primary-foreground rounded-md text-xs font-bold disabled:opacity-50">Taak Inplannen</button>
+              <button onclick={addScheduledTask} disabled={!(newScheduleTask || scheduleTaskSearch) || !newScheduleTime} class="w-full h-9 bg-primary text-primary-foreground rounded-md text-xs font-bold disabled:opacity-50">Taak Inplannen</button>
             </div>
           {/if}
 
@@ -588,14 +672,28 @@
                   <span class="text-[10px] text-muted-foreground uppercase font-bold mt-0.5">
                     {task.occurrence === 'Once' ? 'Eenmalig' :
                      task.occurrence === 'Daily' ? 'Dagelijks' : 
-                     task.occurrence === 'Weekly' ? 'Wekelijks' : 
-                     task.occurrence === 'BiWeekly' ? '2-Wekelijks' : 'Maandelijks'} 
+                     task.occurrence === 'Weekly' ? 'Wekelijks op ' + dayNames[task.day_of_week ?? 0] : 
+                     task.occurrence === 'BiWeekly' ? '2-Wekelijks op ' + dayNames[task.day_of_week ?? 0] : 
+                     'Maandelijks op de ' + task.day_of_month + 'e'} 
                     om {task.start_time}
                   </span>
                 </div>
-                <button onclick={() => deleteScheduledTask(task.id)} class="text-destructive hover:bg-destructive/10 p-1 rounded transition-colors">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                </button>
+                <div class="flex items-center gap-2">
+                  {#if scheduledToDelete === task.id}
+                    <div class="flex items-center gap-2 animate-in fade-in zoom-in-95 duration-200">
+                      <button onclick={() => deleteScheduledTask(task.id)} class="bg-destructive text-destructive-foreground p-1 rounded shadow-sm hover:bg-destructive/90 transition-colors" title="Definitief verwijderen">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                      </button>
+                      <button onclick={() => scheduledToDelete = null} class="text-muted-foreground hover:bg-muted p-1 rounded transition-colors" title="Annuleren">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v.5"/></svg>
+                      </button>
+                    </div>
+                  {:else}
+                    <button onclick={() => scheduledToDelete = task.id} class="text-destructive hover:bg-destructive/10 p-1 rounded transition-colors">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                    </button>
+                  {/if}
+                </div>
               </div>
             {:else}
               <p class="text-center py-4 text-xs text-muted-foreground italic">Nog geen geplande taken.</p>
@@ -612,7 +710,14 @@
       <div class="space-y-4">
         <div class="space-y-2">
           <div class="relative">
-            <input bind:this={manualSearchInput} type="text" bind:value={manualTaskSearch} placeholder="Zoek werksoort..." class="flex h-10 w-full rounded-md border border-input bg-background pl-3 pr-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-ring" />
+            <input 
+              bind:this={manualSearchInput} 
+              type="text" 
+              bind:value={manualTaskSearch} 
+              oninput={() => selectedManualTask = ""}
+              placeholder="Zoek werksoort..." 
+              class="flex h-10 w-full rounded-md border border-input bg-background pl-3 pr-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-ring" 
+            />
           </div>
           {#if manualTaskSearch && !selectedManualTask}
             <div class="max-h-40 overflow-y-auto rounded-md border bg-popover shadow-md divide-y">
@@ -781,9 +886,21 @@
                 {@const diff = Math.floor((new Date(entry.stopped_at).getTime() - new Date(entry.started_at).getTime()) / 1000)}
                 <span class="text-xs font-mono bg-muted px-2 py-0.5 rounded">{formatTime(diff)}</span>
               {/if}
-              <button onclick={() => deleteEntry(entry.id)} class="opacity-0 group-hover:opacity-100 text-destructive p-1 hover:bg-destructive/10 rounded transition-all">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-              </button>
+              
+              {#if entryToDelete === entry.id}
+                <div class="flex items-center gap-2 animate-in fade-in zoom-in-95 duration-200">
+                  <button onclick={() => deleteEntry(entry.id)} class="bg-destructive text-destructive-foreground p-1 rounded shadow-sm hover:bg-destructive/90 transition-colors" title="Definitief verwijderen">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                  </button>
+                  <button onclick={() => entryToDelete = null} class="text-muted-foreground hover:bg-muted p-1 rounded transition-colors" title="Annuleren">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v.5"/></svg>
+                  </button>
+                </div>
+              {:else}
+                <button onclick={() => entryToDelete = entry.id} class="opacity-0 group-hover:opacity-100 text-destructive p-1 hover:bg-destructive/10 rounded transition-all">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                </button>
+              {/if}
             </div>
           </div>
         </div>

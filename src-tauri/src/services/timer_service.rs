@@ -30,9 +30,9 @@ impl TimerService {
         repo.get_scheduled_tasks()
     }
 
-    pub fn add_scheduled_task(&self, task_name: String, occurrence: Occurrence, start_time: String) -> Result<()> {
+    pub fn add_scheduled_task(&self, task_name: String, occurrence: Occurrence, start_time: String, day_of_week: Option<u32>, day_of_month: Option<u32>) -> Result<()> {
         let repo = self.repo.lock().unwrap();
-        repo.add_scheduled_task(&task_name, occurrence, &start_time)
+        repo.add_scheduled_task(&task_name, occurrence, &start_time, day_of_week, day_of_month)
     }
 
     pub fn delete_scheduled_task(&self, id: i64) -> Result<()> {

@@ -11,8 +11,15 @@ pub fn get_scheduled_tasks(state: State<AppState>) -> Result<Vec<ScheduledTask>,
 }
 
 #[tauri::command]
-pub fn add_scheduled_task(task_name: String, occurrence: Occurrence, start_time: String, state: State<AppState>) -> Result<(), String> {
-    state.timer_service.add_scheduled_task(task_name, occurrence, start_time).map_err(|e| e.to_string())
+pub fn add_scheduled_task(
+    task_name: String, 
+    occurrence: Occurrence, 
+    start_time: String, 
+    day_of_week: Option<u32>, 
+    day_of_month: Option<u32>, 
+    state: State<AppState>
+) -> Result<(), String> {
+    state.timer_service.add_scheduled_task(task_name, occurrence, start_time, day_of_week, day_of_month).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
