@@ -6,6 +6,7 @@ use crate::domain::time_entry::TimeEntry;
 use crate::domain::scheduled_task::{ScheduledTask, Occurrence};
 use crate::domain::timer::{WeeklyReport, WeeklyReportEntry};
 use std::collections::HashMap;
+use chrono::Datelike;
 
 pub struct SqliteRepository {
     conn: Connection,
@@ -72,10 +73,8 @@ impl SqliteRepository {
     }
 
     fn seed_defaults(&self) -> Result<()> {
-        // Check if workDays already exists to avoid overwriting user settings
         let existing = self.get_setting("workDays")?;
         if existing.is_none() {
-            // Default Work Days: Mon-Fri [1, 2, 3, 4, 5]
             self.set_setting("workDays", "[1,2,3,4,5]")?;
         }
         Ok(())
@@ -162,6 +161,20 @@ impl SqliteRepository {
         Ok(())
     }
 
+    pub fn add_tasks_bulk(&self, names: Vec<String>) -> Result<()> {
+        // We use a manual transaction approach since we have &self and non-mut Connection
+        // (rusqlite Connection can execute BEGIN/COMMIT)
+        self.conn.execute("BEGIN TRANSACTION", [])?;
+        for name in names {
+            self.conn.execute(
+                "INSERT OR IGNORE INTO tasks (name, created_at) VALUES (?, ?)",
+                params![name, Utc::now().to_rfc3339()],
+            )?;
+        }
+        self.conn.execute("COMMIT TRANSACTION", [])?;
+        Ok(())
+    }
+
     pub fn delete_task(&self, id: i64) -> Result<()> {
         self.conn.execute("DELETE FROM tasks WHERE id = ?", params![id])?;
         Ok(())
@@ -203,13 +216,8 @@ impl SqliteRepository {
         self.conn.execute("DELETE FROM time_entries WHERE id = ?", params![id])?;
         Ok(())
     }
-pub fn execute_batch(&self, sql: &str) -> Result<()> {
-    self.conn.execute_batch(sql).with_context(|| "Fout bij uitvoeren van SQL batch")?;
-    Ok(())
-}
 
-pub fn get_top_tasks(&self) -> Result<Vec<String>> {
-
+    pub fn get_top_tasks(&self) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare(
             "SELECT task_name, COUNT(*) as count FROM time_entries GROUP BY task_name ORDER BY count DESC LIMIT 9"
         )?;

@@ -272,7 +272,7 @@
     }
   }
 
-  async function handleSqlUpload(event: Event) {
+  async function handleTaskImport(event: Event) {
     const input = event.target as HTMLInputElement;
     if (!input.files || input.files.length === 0) return;
     
@@ -280,9 +280,9 @@
     const reader = new FileReader();
     
     reader.onload = async (e) => {
-      const sql = e.target?.result as string;
+      const jsonData = e.target?.result as string;
       try {
-        await invoke("import_tasks", { sql });
+        await invoke("import_tasks", { jsonData });
         alert("Taken succesvol geïmporteerd!");
         await loadData();
       } catch (err) {
@@ -727,14 +727,14 @@
           <label class="text-[10px] uppercase font-bold text-muted-foreground block mb-3">Data Beheer</label>
           <div class="flex items-center gap-3">
             <label class="flex-1">
-              <span class="sr-only">Kies .sql bestand</span>
+              <span class="sr-only">Kies .json bestand</span>
               <div class="flex h-9 w-full items-center justify-center rounded-md border border-dashed border-muted-foreground/30 px-3 text-xs text-muted-foreground hover:bg-muted/30 cursor-pointer transition-colors">
-                Taken importeren (.sql)
+                Taken importeren (.json)
               </div>
-              <input type="file" accept=".sql" onchange={handleSqlUpload} class="hidden" />
+              <input type="file" accept=".json" onchange={handleTaskImport} class="hidden" />
             </label>
           </div>
-          <p class="mt-2 text-[9px] text-muted-foreground italic">Selecteer een .sql bestand om werksoorten in bulk toe te voegen.</p>
+          <p class="mt-2 text-[9px] text-muted-foreground italic">Selecteer een .json bestand om werksoorten in bulk toe te voegen.</p>
         </div>
       </div>
     </section>

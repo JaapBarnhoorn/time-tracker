@@ -35,15 +35,18 @@ impl TimerService {
         repo.add_scheduled_task(&task_name, occurrence, &start_time, day_of_week, day_of_month)
     }
 
-    pub fn delete_scheduled_task(&self, id: i64) -> Result<()> {
+    pub fn delete_entry(&self, id: i64) -> Result<()> {
         let repo = self.repo.lock().unwrap();
-        repo.delete_scheduled_task(id)
+        repo.delete_time_entry(id)
     }
 
-    pub fn import_tasks(&self, sql: String) -> Result<()> {
+    pub fn import_tasks(&self, json_data: String) -> Result<()> {
+        let names: Vec<String> = serde_json::from_str(&json_data)
+            .with_context(|| "Ongeldig JSON formaat voor taken import")?;
         let repo = self.repo.lock().unwrap();
-        repo.execute_batch(&sql)
+        repo.add_tasks_bulk(names)
     }
+
 
     pub fn update_scheduled_task_last_run(&self, id: i64, date: String) -> Result<()> {
         let repo = self.repo.lock().unwrap();
@@ -89,8 +92,9 @@ impl TimerService {
 
     pub fn delete_entry(&self, id: i64) -> Result<()> {
         let repo = self.repo.lock().unwrap();
-        repo.delete_entry(id)
+        repo.delete_time_entry(id)
     }
+
 
     pub fn status(&self) -> Result<StatusResponse> {
         let repo = self.repo.lock().unwrap();
