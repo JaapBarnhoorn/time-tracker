@@ -199,12 +199,17 @@ impl SqliteRepository {
         Ok(())
     }
 
-    pub fn delete_entry(&self, id: i64) -> Result<()> {
+    pub fn delete_time_entry(&self, id: i64) -> Result<()> {
         self.conn.execute("DELETE FROM time_entries WHERE id = ?", params![id])?;
         Ok(())
     }
+pub fn execute_batch(&self, sql: &str) -> Result<()> {
+    self.conn.execute_batch(sql).with_context(|| "Fout bij uitvoeren van SQL batch")?;
+    Ok(())
+}
 
-    pub fn get_top_tasks(&self) -> Result<Vec<String>> {
+pub fn get_top_tasks(&self) -> Result<Vec<String>> {
+
         let mut stmt = self.conn.prepare(
             "SELECT task_name, COUNT(*) as count FROM time_entries GROUP BY task_name ORDER BY count DESC LIMIT 9"
         )?;

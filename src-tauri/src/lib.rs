@@ -47,17 +47,11 @@ pub fn run() {
             let app_handle = app.handle().clone();
             
             // Registreer twee varianten voor maximale kans van slagen
-            // Variant 1: Command+Shift+T (Super+Shift+T)
             let sc1 = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyT);
-            if let Err(e) = app.global_shortcut().register(sc1) {
-                println!("Fout bij registreren sc1: {}", e);
-            }
+            let _ = app.global_shortcut().register(sc1);
 
-            // Variant 2: Alt+Shift+T (Option+Shift+T) - vaak veiliger op macOS
             let sc2 = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyT);
-            if let Err(e) = app.global_shortcut().register(sc2) {
-                println!("Fout bij registreren sc2: {}", e);
-            }
+            let _ = app.global_shortcut().register(sc2);
             
             // Tray Icon Setup
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -113,7 +107,6 @@ pub fn run() {
                         let now = Local::now();
                         let minute = now.minute() as i32;
                         
-                        // Update cached work days once per minute
                         if minute != last_checked_minute {
                             if let Ok(Some(saved)) = state.timer_service.get_setting("workDays".to_string()) {
                                 cached_work_days = serde_json::from_str(&saved).unwrap_or(vec![1, 2, 3, 4, 5]);
@@ -125,22 +118,17 @@ pub fn run() {
                         let now_time_str = now.format("%H:%M").to_string();
                         let weekday = now.weekday(); 
                         
-                        // Check Scheduled Tasks
                         if let Ok(scheduled_tasks) = state.timer_service.get_scheduled_tasks() {
                             for task in scheduled_tasks {
-                                // Check if task is due today based on occurrence
                                 let is_due_today = match task.occurrence {
                                     crate::domain::scheduled_task::Occurrence::Once => true,
                                     crate::domain::scheduled_task::Occurrence::Daily => {
-                                        // Smart "Daily" only on work days
                                         cached_work_days.contains(&((weekday.number_from_monday() % 7) as u32))
                                     },
                                     crate::domain::scheduled_task::Occurrence::Weekly => {
                                         task.day_of_week == Some((weekday.number_from_monday() % 7) as u32)
                                     },
                                     crate::domain::scheduled_task::Occurrence::BiWeekly => {
-                                        // Simple BiWeekly: same weekday and even week number (or odd, depending on start)
-                                        // To be more precise we'd need a reference date, but let's use week number for now
                                         task.day_of_week == Some((weekday.number_from_monday() % 7) as u32) && (now.iso_week().week() % 2 == 0)
                                     },
                                     crate::domain::scheduled_task::Occurrence::Monthly => {
@@ -149,7 +137,6 @@ pub fn run() {
                                 };
 
                                 if is_due_today && task.last_run.as_deref() != Some(&today_str) {
-                                    // Parse start_time
                                     let parts: Vec<&str> = task.start_time.split(':').collect();
                                     if parts.len() == 2 {
                                         let h: u32 = parts[0].parse().unwrap_or(0);
@@ -158,7 +145,6 @@ pub fn run() {
                                         let scheduled_dt = now.with_hour(h).and_then(|dt| dt.with_minute(m)).and_then(|dt| dt.with_second(0)).unwrap_or(now);
                                         let diff = scheduled_dt.signed_duration_since(now).num_minutes();
 
-                                        // 5 Minute Reminder
                                         if diff == 5 && last_reminder_task_id != task.id.unwrap_or(-1) {
                                             let _ = tauri_plugin_notification::NotificationExt::notification(&app_handle_for_thread)
                                                 .builder()
@@ -168,18 +154,13 @@ pub fn run() {
                                             last_reminder_task_id = task.id.unwrap_or(-1);
                                         }
 
-                                        // Auto Start
                                         if now_time_str == task.start_time {
                                             let _ = state.timer_service.start(task.task_name.clone());
-                                            
                                             if let crate::domain::scheduled_task::Occurrence::Once = task.occurrence {
-                                                // If Once, delete it after starting
                                                 let _ = state.timer_service.delete_scheduled_task(task.id.unwrap());
                                             } else {
-                                                // Otherwise just mark as run today
                                                 let _ = state.timer_service.update_scheduled_task_last_run(task.id.unwrap(), today_str.clone());
                                             }
-                                            
                                             let _ = tauri_plugin_notification::NotificationExt::notification(&app_handle_for_thread)
                                                 .builder()
                                                 .title("Geplande taak gestart")
@@ -191,7 +172,6 @@ pub fn run() {
                             }
                         }
 
-                        // Regular Reminder
                         if let Ok(status) = state.timer_service.status() {
                             if status.running {
                                 reminder_counter += 1;
@@ -214,6 +194,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::import_tasks,
             commands::get_weekly_report,
             commands::get_scheduled_tasks,
             commands::add_scheduled_task,
@@ -240,9 +221,9 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
+        .run(|app_handle, _event| {
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Reopen { .. } = event {
+            if let tauri::RunEvent::Reopen { .. } = _event {
                 if let Some(window) = app_handle.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.unminimize();
@@ -250,7 +231,6 @@ pub fn run() {
                 }
             }
             
-            // Avoid compiler warnings about unused app_handle on non-macOS
             #[cfg(not(target_os = "macos"))]
             let _ = app_handle;
         });

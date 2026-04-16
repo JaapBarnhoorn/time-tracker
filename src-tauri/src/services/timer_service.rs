@@ -40,6 +40,11 @@ impl TimerService {
         repo.delete_scheduled_task(id)
     }
 
+    pub fn import_tasks(&self, sql: String) -> Result<()> {
+        let repo = self.repo.lock().unwrap();
+        repo.execute_batch(&sql)
+    }
+
     pub fn update_scheduled_task_last_run(&self, id: i64, date: String) -> Result<()> {
         let repo = self.repo.lock().unwrap();
         repo.update_scheduled_task_last_run(id, &date)

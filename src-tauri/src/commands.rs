@@ -78,6 +78,11 @@ pub fn add_task(name: String, state: State<AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn import_tasks(sql: String, state: State<AppState>) -> Result<(), String> {
+    state.timer_service.import_tasks(sql).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn get_tasks(state: State<AppState>) -> Result<Vec<String>, String> {
     state.timer_service.get_all_tasks().map_err(|e| e.to_string())
 }
