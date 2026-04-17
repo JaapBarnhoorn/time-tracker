@@ -160,18 +160,21 @@ impl SqliteRepository {
         Ok(())
     }
 
-    pub fn add_tasks_bulk(&self, names: Vec<String>) -> Result<()> {
-        // We use a manual transaction approach since we have &self and non-mut Connection
-        // (rusqlite Connection can execute BEGIN/COMMIT)
+    pub fn add_tasks_bulk(&self, names: Vec<String>) -> Result<usize> {
+        let mut added_count = 0;
         self.conn.execute("BEGIN TRANSACTION", [])?;
         for name in names {
             self.conn.execute(
                 "INSERT OR IGNORE INTO tasks (name, created_at) VALUES (?, ?)",
                 params![name, Utc::now().to_rfc3339()],
             )?;
+            if self.conn.changes() > 0 {
+                added_count += 1;
+            }
         }
         self.conn.execute("COMMIT TRANSACTION", [])?;
-        Ok(())
+        println!("Database seed voltooid: {} nieuwe taken toegevoegd.", added_count);
+        Ok(added_count)
     }
 
     pub fn delete_task(&self, id: i64) -> Result<()> {

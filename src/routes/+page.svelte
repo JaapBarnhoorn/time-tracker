@@ -282,10 +282,13 @@
     reader.onload = async (e) => {
       const jsonData = e.target?.result as string;
       try {
-        await invoke("import_tasks", { jsonData });
-        alert("Taken succesvol geïmporteerd!");
+        console.log("Importing tasks from JSON...");
+        const addedCount: number = await invoke("import_tasks", { jsonData });
+        console.log(`Import successful: ${addedCount} tasks added.`);
+        alert(`Klaar! Er zijn ${addedCount} nieuwe taken toegevoegd aan je lijst.`);
         await loadData();
       } catch (err) {
+        console.error("Import failed:", err);
         alert("Fout bij importeren: " + err);
       }
     };

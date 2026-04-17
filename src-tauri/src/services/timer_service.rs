@@ -40,7 +40,7 @@ impl TimerService {
         repo.delete_scheduled_task(id)
     }
 
-    pub fn import_tasks(&self, json_data: String) -> Result<()> {
+    pub fn import_tasks(&self, json_data: String) -> Result<usize> {
         let names: Vec<String> = serde_json::from_str(&json_data)
             .with_context(|| "Ongeldig JSON formaat voor taken import")?;
         let repo = self.repo.lock().unwrap();
