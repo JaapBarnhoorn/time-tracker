@@ -6,7 +6,6 @@ use crate::domain::time_entry::TimeEntry;
 use crate::domain::scheduled_task::{ScheduledTask, Occurrence};
 use crate::domain::timer::{WeeklyReport, WeeklyReportEntry};
 use std::collections::HashMap;
-use chrono::Datelike;
 
 pub struct SqliteRepository {
     conn: Connection,
