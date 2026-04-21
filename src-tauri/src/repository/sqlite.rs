@@ -359,4 +359,49 @@ impl SqliteRepository {
         }
         Ok(results)
     }
+
+    pub fn get_earliest_entry_date(&self) -> Result<Option<String>> {
+        let mut stmt = self.conn.prepare("SELECT MIN(started_at) FROM time_entries")?;
+        let mut rows = stmt.query([])?;
+        if let Some(row) = rows.next()? {
+            let val: Option<String> = row.get(0)?;
+            Ok(val.map(|s| s.split('T').next().unwrap_or("").to_string()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn get_all_time_entries(&self) -> Result<Vec<TimeEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, task_name, started_at, stopped_at FROM time_entries ORDER BY started_at DESC"
+        )?;
+        
+        let rows = stmt.query_map([], |row| {
+            let started_at_str: String = row.get(2)?;
+            let stopped_at_str: Option<String> = row.get(3)?;
+            
+            let started_at = DateTime::parse_from_rfc3339(&started_at_str)
+                .map(|dt| dt.with_timezone(&Utc))
+                .unwrap_or(Utc::now());
+            
+            let stopped_at = stopped_at_str.and_then(|s| {
+                DateTime::parse_from_rfc3339(&s)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .ok()
+            });
+
+            Ok(TimeEntry {
+                id: Some(row.get(0)?),
+                task_name: row.get(1)?,
+                started_at,
+                stopped_at,
+            })
+        })?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
 }

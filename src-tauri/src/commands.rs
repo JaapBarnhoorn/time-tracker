@@ -101,3 +101,13 @@ pub fn get_top_tasks(state: State<AppState>) -> Result<Vec<String>, String> {
 pub fn get_last_task_name(state: State<AppState>) -> Result<Option<String>, String> {
     state.timer_service.get_last_task_name().map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub fn get_earliest_entry_date(state: State<AppState>) -> Result<Option<String>, String> {
+    state.timer_service.get_earliest_entry_date().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_all_time_entries(state: State<AppState>) -> Result<Vec<TimeEntry>, String> {
+    state.timer_service.get_all_time_entries().map_err(|e| e.to_string())
+}

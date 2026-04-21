@@ -209,6 +209,8 @@ pub fn run() {
             commands::get_daily_entries,
             commands::get_top_tasks,
             commands::get_last_task_name,
+            commands::get_earliest_entry_date,
+            commands::get_all_time_entries,
             commands::add_manual_entry,
             commands::update_time_entry,
             commands::delete_time_entry

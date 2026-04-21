@@ -48,6 +48,23 @@
   // Weekly Report State
   let showWeeklyReport = $state(false);
   let weeklyReport: WeeklyReport | null = $state(null);
+  let weeklyReportMonday = $state<Date | null>(null);
+  let earliestEntryMonday = $state<Date | null>(null);
+
+  async function loadEarliestEntry() {
+    try {
+      const dateStr: string | null = await invoke("get_earliest_entry_date");
+      if (dateStr) {
+        const d = new Date(dateStr);
+        const day = d.getDay();
+        const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+        earliestEntryMonday = new Date(d.setDate(diff));
+        earliestEntryMonday.setHours(0,0,0,0);
+      }
+    } catch (e) {
+      console.error("Earliest entry laden mislukt:", e);
+    }
+  }
   
   // Scheduling UI state
   let showAddSchedule = $state(false);
@@ -253,23 +270,83 @@
   async function toggleWeeklyReport() {
     showWeeklyReport = !showWeeklyReport;
     if (showWeeklyReport) {
+      await loadEarliestEntry();
+      // Vind de maandag van de huidige viewDate
+      const d = new Date(viewDate);
+      d.setHours(0,0,0,0);
+      const day = d.getDay();
+      const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+      weeklyReportMonday = new Date(d.setDate(diff));
       await loadWeeklyReport();
     }
   }
 
   async function loadWeeklyReport() {
-    // Vind de maandag van de huidige viewDate
-    const d = new Date(viewDate);
-    const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Pas aan naar Maandag
-    const monday = new Date(d.setDate(diff));
-    const mondayStr = `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+    if (!weeklyReportMonday) return;
+    const mondayStr = `${weeklyReportMonday.getFullYear()}-${String(weeklyReportMonday.getMonth() + 1).padStart(2, '0')}-${String(weeklyReportMonday.getDate()).padStart(2, '0')}`;
     
     try {
       weeklyReport = await invoke("get_weekly_report", { startDate: mondayStr });
     } catch (e) {
       console.error("Weekrapport laden mislukt:", e);
     }
+  }
+
+  async function changeWeeklyReportWeek(weeks: number) {
+    if (!weeklyReportMonday) return;
+    const next = new Date(weeklyReportMonday);
+    next.setDate(next.getDate() + (weeks * 7));
+    next.setHours(0,0,0,0);
+    
+    // Don't allow navigating too far into the future (max current week)
+    const today = new Date();
+    const day = today.getDay();
+    const diff = today.getDate() - day + (day === 0 ? -6 : 1);
+    const thisMonday = new Date(today.setDate(diff));
+    thisMonday.setHours(0,0,0,0);
+    
+    if (next <= thisMonday) {
+      weeklyReportMonday = next;
+      await loadWeeklyReport();
+    }
+  }
+
+  function downloadJson(data: any, filename: string) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function exportCurrentWeek() {
+    if (!weeklyReport) return;
+    const filename = `weekrapport-${weeklyReport.start_date}-tm-${weeklyReport.end_date}.json`;
+    downloadJson(weeklyReport, filename);
+  }
+
+  async function exportAllData() {
+    try {
+      const allEntries: TimeEntry[] = await invoke("get_all_time_entries");
+      const filename = `time-tracker-volledige-export-${new Date().toISOString().split('T')[0]}.json`;
+      downloadJson(allEntries, filename);
+    } catch (e) {
+      alert("Export mislukt: " + e);
+    }
+  }
+
+  function isCurrentWeek(monday: Date | null) {
+    if (!monday) return false;
+    const today = new Date();
+    const day = today.getDay();
+    const diff = today.getDate() - day + (day === 0 ? -6 : 1);
+    const thisMonday = new Date(today.setDate(diff));
+    thisMonday.setHours(0,0,0,0);
+    return monday.getTime() === thisMonday.getTime();
   }
 
   async function handleTaskImport(event: Event) {
@@ -965,12 +1042,34 @@
   </div>
 
   {#if showWeeklyReport && weeklyReport}
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+    <div class="fixed inset-0 z-50 flex items-start justify-center bg-background/80 backdrop-blur-sm p-4 pt-12 animate-in fade-in duration-200">
       <div class="w-full max-w-4xl max-h-[90vh] overflow-hidden rounded-xl border bg-card shadow-2xl flex flex-col">
         <div class="flex items-center justify-between border-b p-4 px-6">
-          <div>
-            <h2 class="text-lg font-bold">Weekoverzicht</h2>
-            <p class="text-xs text-muted-foreground">{new Date(weeklyReport.start_date).toLocaleDateString('nl-NL', {day: 'numeric', month: 'long'})} t/m {new Date(weeklyReport.end_date).toLocaleDateString('nl-NL', {day: 'numeric', month: 'long'})}</p>
+          <div class="flex items-center gap-6">
+            <div class="min-w-[200px]">
+              <h2 class="text-lg font-bold">Weekoverzicht</h2>
+              <p class="text-xs text-muted-foreground">{new Date(weeklyReport.start_date).toLocaleDateString('nl-NL', {day: 'numeric', month: 'long'})} t/m {new Date(weeklyReport.end_date).toLocaleDateString('nl-NL', {day: 'numeric', month: 'long'})}</p>
+            </div>
+            
+            <div class="flex items-center gap-2 ml-4">
+              <button 
+                onclick={() => changeWeeklyReportWeek(-1)} 
+                disabled={earliestEntryMonday && weeklyReportMonday && weeklyReportMonday <= earliestEntryMonday}
+                class="p-1.5 hover:bg-muted rounded-md transition-colors border shadow-sm disabled:opacity-20" 
+                title="Vorige week"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+              </button>
+              
+              <button 
+                onclick={() => changeWeeklyReportWeek(1)} 
+                disabled={isCurrentWeek(weeklyReportMonday)}
+                class="p-1.5 hover:bg-muted rounded-md transition-colors border shadow-sm disabled:opacity-20" 
+                title="Volgende week"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+              </button>
+            </div>
           </div>
           <button onclick={() => showWeeklyReport = false} class="text-muted-foreground hover:text-foreground">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -1018,8 +1117,20 @@
             </tfoot>
           </table>
           
-          <div class="mt-8 flex justify-center">
+          <div class="mt-8 flex flex-col items-center gap-4">
             <p class="text-[10px] text-muted-foreground italic max-w-md text-center">Tijden worden afgerond op één decimaal (bijv. 1.5 uur = 1 uur en 30 minuten) voor eenvoudige invoer in administratieve systemen.</p>
+            
+            <div class="flex gap-3">
+              <button onclick={exportCurrentWeek} class="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold border rounded-md hover:bg-muted transition-colors shadow-sm">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                Exporteer deze week (JSON)
+              </button>
+              
+              <button onclick={exportAllData} class="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold bg-muted hover:bg-muted/80 rounded-md transition-colors shadow-sm">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                Volledige export (JSON)
+              </button>
+            </div>
           </div>
         </div>
       </div>

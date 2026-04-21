@@ -133,4 +133,14 @@ impl TimerService {
         let repo = self.repo.lock().unwrap();
         repo.get_last_task_name()
     }
+
+    pub fn get_earliest_entry_date(&self) -> Result<Option<String>> {
+        let repo = self.repo.lock().unwrap();
+        repo.get_earliest_entry_date()
+    }
+
+    pub fn get_all_time_entries(&self) -> Result<Vec<TimeEntry>> {
+        let repo = self.repo.lock().unwrap();
+        repo.get_all_time_entries()
+    }
 }
