@@ -204,6 +204,7 @@ pub fn run() {
             commands::start_task,
             commands::stop_task,
             commands::add_task,
+            commands::delete_task,
             commands::get_status,
             commands::get_tasks,
             commands::get_daily_entries,

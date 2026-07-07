@@ -78,11 +78,34 @@
   let dailyEntries: TimeEntry[] = $state([]);
   let lastTaskName: string | null = $state(null);
   let searchInput: HTMLInputElement | undefined = $state();
+  let newTaskName = $state("");
   let isDark = $state(false);
-  
+  let recentlyAddedTask = $state<string | null>(null);
+  let taskListContainer = $state<HTMLElement | null>(null);
+
+  $effect(() => {
+    if (recentlyAddedTask && taskListContainer) {
+      const taskElement = taskListContainer.querySelector(`[data-task="${recentlyAddedTask}"]`);
+      if (taskElement) {
+        taskElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  });
+
   // Day change tracking
   let lastCheckedDay = new Date().getDate();
   let currentSystemDate = $state(new Date().toISOString().split('T')[0]);
+
+  let notification = $state<{ message: string, type: 'success' | 'error' } | null>(null);
+  let notificationTimeout: number | undefined;
+
+  function showNotification(message: string, type: 'success' | 'error', duration = 3000) {
+    notification = { message, type };
+    if (notificationTimeout) clearTimeout(notificationTimeout);
+    notificationTimeout = setTimeout(() => {
+      notification = null;
+    }, duration);
+  }
 
   function checkDayChange() {
     const now = new Date();
@@ -137,7 +160,7 @@
   );
 
   let currentSelectorTasks = $derived(
-    showAllTasks || searchTerm ? filteredTasks.slice(0, 15) : topTasks
+    showAllTasks || searchTerm ? filteredTasks : topTasks
   );
 
   // Keyboard Navigation
@@ -362,11 +385,10 @@
         console.log("Importing tasks from JSON...");
         const addedCount: number = await invoke("import_tasks", { jsonData });
         console.log(`Import successful: ${addedCount} tasks added.`);
-        alert(`Klaar! Er zijn ${addedCount} nieuwe taken toegevoegd aan je lijst.`);
+        showNotification(`Klaar! Er zijn ${addedCount} nieuwe taken toegevoegd aan je lijst.`, 'success');
         await loadData();
       } catch (err) {
-        console.error("Import failed:", err);
-        alert("Fout bij importeren: " + err);
+        showNotification("Fout bij importeren: " + err, 'error');
       }
     };
     
@@ -418,7 +440,7 @@
       showAddSchedule = false;
       await loadScheduledTasks();
     } catch (e) {
-      alert("Fout bij plannen: " + e);
+      showNotification("Fout bij plannen: " + e, 'error');
     }
   }
 
@@ -431,7 +453,7 @@
       scheduledToDelete = null;
       await loadScheduledTasks();
     } catch (e) {
-      alert("Verwijderen mislukt: " + e);
+      showNotification("Verwijderen mislukt: " + e, 'error');
     }
   }
 
@@ -446,6 +468,33 @@
       }
     } catch (e) {
       topTasks = tasks.slice(0, 9);
+    }
+  }
+
+  async function addTask() {
+    if (!newTaskName.trim()) return;
+    try {
+      const addedTaskName = newTaskName.trim();
+      await invoke("add_task", { name: addedTaskName });
+      showNotification(`De taak "${addedTaskName}" is toegevoegd.`, 'success');
+      newTaskName = "";
+      await loadData();
+      recentlyAddedTask = addedTaskName;
+      setTimeout(() => {
+        recentlyAddedTask = null;
+      }, 2000);
+    } catch (e) {
+      showNotification("Fout bij toevoegen taak: " + e, 'error');
+    }
+  }
+
+  async function deleteTask(name: string) {
+    try {
+      await invoke("delete_task", { name });
+      showNotification(`De taak "${name}" is verwijderd.`, 'success');
+      await loadData();
+    } catch (e) {
+      showNotification("Fout bij verwijderen taak: " + e, 'error');
     }
   }
 
@@ -482,7 +531,7 @@
       await updateTopTasks();
       lastTaskName = await invoke("get_last_task_name");
     } catch (e) {
-      alert("Fout bij starten taak: " + e);
+      showNotification("Fout bij starten taak: " + e, 'error');
     }
   }
 
@@ -492,7 +541,7 @@
       if (lastTask) {
         await startTask(lastTask);
       } else {
-        alert("Geen recente taak gevonden om te hervatten.");
+        showNotification("Geen recente taak gevonden om te hervatten.", 'error');
       }
     } catch (e) {
       console.error("Resume mislukt:", e);
@@ -507,7 +556,7 @@
       await updateTopTasks();
       lastTaskName = await invoke("get_last_task_name");
     } catch (e) {
-      alert("Fout bij stoppen taak: " + e);
+      showNotification("Fout bij stoppen taak: " + e, 'error');
     }
   }
 
@@ -524,7 +573,7 @@
       await loadDailyEntries();
       await updateTopTasks();
     } catch (e) {
-      alert("Fout bij toevoegen: " + e);
+      showNotification("Fout bij toevoegen: " + e, 'error');
     }
   }
 
@@ -538,7 +587,7 @@
       await updateStatus();
       await updateTopTasks();
     } catch (e) {
-      alert("Verwijderen mislukt: " + e);
+      showNotification("Verwijderen mislukt: " + e, 'error');
     }
   }
 
@@ -564,7 +613,7 @@
       await loadDailyEntries();
       await updateStatus();
     } catch (e) {
-      alert("Opslaan mislukt: " + e);
+      showNotification("Opslaan mislukt: " + e, 'error');
     }
   }
 
@@ -579,7 +628,7 @@
       await updateStatus();
       await loadDailyEntries();
     } catch (e) {
-      alert("Aanpassen mislukt: " + e);
+      showNotification("Aanpassen mislukt: " + e, 'error');
     }
   }
 
@@ -621,6 +670,7 @@
   }
 
   onMount(() => {
+    checkNotificationPermission();
     isDark = document.documentElement.classList.contains("dark");
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("focus", checkDayChange);
@@ -930,19 +980,32 @@
         </div>
         <input bind:this={searchInput} type="text" bind:value={searchTerm} placeholder="Zoek werksoort..." class="flex h-11 w-full rounded-md border border-input bg-background pl-10 pr-4 py-2 text-sm focus-visible:ring-2 focus-visible:ring-ring transition-all shadow-sm" />
       </div>
+
+      <!-- ADD THIS NEW BLOCK -->
+      <div class="flex gap-2 animate-in fade-in duration-200">
+        <input type="text" bind:value={newTaskName} placeholder="Nieuwe taak toevoegen..." onkeydown={(e) => e.key === 'Enter' && addTask()} class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" />
+        <button onclick={() => addTask()} class="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-md font-medium shadow-sm">Toevoegen</button>
+      </div>
+      <!-- END OF NEW BLOCK -->
     {/if}
     
-    <div class="grid gap-2 max-h-[320px] overflow-y-auto pr-2 custom-scrollbar">
+    <div bind:this={taskListContainer} class="grid grid-cols-1 gap-2 max-h-[320px] overflow-y-auto w-full pr-2 custom-scrollbar">
       {#each currentSelectorTasks as task, i}
-        <button onclick={() => startTask(task)} class="group flex items-center justify-between rounded-lg border bg-card px-4 py-3 text-left text-sm transition-all hover:border-primary/50 hover:bg-accent shadow-sm">
-          <div class="flex items-center flex-1 min-w-0">
+        <div data-task={task} class="group flex items-center justify-between rounded-lg border px-4 py-3 text-left text-sm transition-all shadow-sm w-full {task === recentlyAddedTask ? 'bg-primary/20 border-primary' : 'bg-card hover:border-primary/50 hover:bg-accent'}">
+          <button onclick={() => startTask(task)} class="flex items-center flex-1 min-w-0 text-left">
             {#if !showAllTasks && !searchTerm}
               <span class="mr-3 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-muted text-[10px] font-bold text-muted-foreground group-hover:bg-primary group-hover:text-primary-foreground transition-colors">{i + 1}</span>
             {/if}
             <span class="font-medium truncate">{task}</span>
+          </button>
+          <div class="flex flex-shrink-0 items-center pl-2">
+            {#if (showAllTasks || searchTerm)}
+              <button onclick={() => deleteTask(task)} class="p-1 text-destructive opacity-0 group-hover:opacity-100 transition-opacity rounded-md hover:bg-destructive/10 pointer-events-auto" title="Verwijder taak">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+              </button>
+            {/if}
           </div>
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ml-2 opacity-0 transition-opacity group-hover:opacity-100"><polyline points="9 18 15 12 9 6"/></svg>
-        </button>
+        </div>
       {/each}
     </div>
   </section>
@@ -1134,6 +1197,19 @@
           </div>
         </div>
       </div>
+    </div>
+  {/if}
+    {#if notification}
+    <div class="fixed bottom-4 right-4 flex items-center gap-3 p-4 rounded-xl border shadow-lg text-sm
+      {notification.type === 'success' ? 'bg-green-500/10 border-green-500/20 text-green-700 dark:text-green-300' : 'bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-300'}
+      animate-in fade-in slide-in-from-bottom-4">
+      
+      {#if notification.type === 'success'}
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>
+      {:else}
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+      {/if}
+      <span>{notification.message}</span>
     </div>
   {/if}
 </main>

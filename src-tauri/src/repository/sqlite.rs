@@ -177,8 +177,8 @@ impl SqliteRepository {
         Ok(added_count)
     }
 
-    pub fn delete_task(&self, id: i64) -> Result<()> {
-        self.conn.execute("DELETE FROM tasks WHERE id = ?", params![id])?;
+    pub fn delete_task(&self, name: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM tasks WHERE name = ?1", [name])?;
         Ok(())
     }
 

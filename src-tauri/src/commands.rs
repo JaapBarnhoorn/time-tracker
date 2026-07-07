@@ -78,6 +78,11 @@ pub fn add_task(name: String, state: State<AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn delete_task(name: String, state: State<AppState>) -> Result<(), String> {
+    state.timer_service.delete_task(name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn import_tasks(json_data: String, state: State<AppState>) -> Result<usize, String> {
     state.timer_service.import_tasks(json_data).map_err(|e| e.to_string())
 }

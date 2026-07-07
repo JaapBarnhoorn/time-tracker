@@ -62,6 +62,11 @@ impl TimerService {
         repo.add_task(&name)
     }
 
+    pub fn delete_task(&self, name: String) -> Result<()> {
+        let repo = self.repo.lock().unwrap();
+        repo.delete_task(&name)
+    }
+
     pub fn start(&self, task_name: String) -> Result<()> {
         let repo = self.repo.lock().unwrap();
         if let Some((id, _, _)) = repo.get_running_task()? {
